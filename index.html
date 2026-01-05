@@ -1,0 +1,369 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Call Scheduler</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        #form, #scheduleSection { border: 1px solid #000; padding: 15px; }
+        section { margin-bottom: 30px; }
+        label { display: block; margin-bottom: 10px; }
+        input, select { padding: 5px; }
+        .schedule-item { padding: 5px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
+        .schedule-item button { padding: 5px 10px; background-color: #dc3545; color: white; border: none; cursor: pointer; }
+        .schedule-item button:hover { background-color: #c82333; }
+        #addButton { padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; }
+        #addButton:hover { background-color: #0056b3; }
+        #addFormButton { padding: 5px 10px; background-color: #007bff; color: white; border: none; cursor: pointer; float: right; }
+        #addFormButton:hover { background-color: #0056b3; }
+        #cancelButton { padding: 10px 20px; background-color: #6c757d; color: white; border: none; cursor: pointer; }
+        #cancelButton:hover { background-color: #5a6268; }
+    </style>
+</head>
+<body>
+    <div id="form" style="display: none;">
+        <section id="myLocation">
+            <h2>My Location</h2>
+            <label>Country: <select id="myCountry"></select></label>
+            <label id="myRegionLabel" style="display: none;">Region: <select id="myRegion"></select></label>
+            <p>Timezone: <span id="myTimezone"></span></p>
+        </section>
+
+        <section id="clientInput">
+            <h2>Client Call Time</h2>
+            <label>Client Name: <input id="clientName" type="text"></label>
+            <label>Country: <select id="clientCountry"></select></label>
+            <label id="clientRegionLabel" style="display: none;">Region: <select id="clientRegion"></select></label>
+            <p>Timezone: <span id="clientTimezone"></span></p>
+            <label>Date (DD/MM/YYYY): <input id="clientDate" type="text" placeholder="DD/MM/YYYY" pattern="\d{1,2}[/.-]\d{1,2}[/.-]\d{4}" title="Date in DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, MM/DD/YYYY, MM-DD-YYYY, or MM.DD.YYYY"></label>
+            <label>Time (12-hour AM/PM): <input id="clientTime" type="text" placeholder="2:00 PM" pattern="(1[0-2]|0?[1-9])(:[0-5][0-9])? ?(AM|PM|am|pm)" title="Time in h:mm AM/PM or h AM/PM"></label>
+        </section>
+
+        <section id="preview">
+            <h2>Live Preview</h2>
+            <p><strong>Client:</strong> <span id="clientPreview"></span></p>
+            <p><strong>My local time:</strong> <span id="myPreview"></span></p>
+            <p id="previewError" style="color: red;"></p>
+        </section>
+
+        <button id="addButton">Add to Schedule</button>
+        <p id="addError" style="color: red;"></p>
+        <button id="cancelButton">Cancel</button>
+    </div>
+
+    <div id="scheduleSection">
+        <h2>Schedule for a week <button id="addFormButton">+ Add</button></h2>
+        <div id="scheduleList"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+    <script>
+        const { DateTime } = luxon;
+        let countries = {};
+        let countryList = [];
+        let schedule = [];
+
+        fetch('https://raw.githubusercontent.com/osmanyz/country-timezone/main/data/country.json')
+            .then(res => res.json())
+            .then(data => {
+                countries = Object.fromEntries(data.map(c => [c.code, c]));
+                countryList = [...data].sort((a, b) => a.name.localeCompare(b.name));
+                populateCountries('myCountry', 'AM');
+                populateCountries('clientCountry');
+                handleCountryChange(true);
+            });
+
+        function populateCountries(selectId, defaultCountryId = null) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = '<option value="">Select Country</option>';
+            countryList.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.code;
+                opt.text = c.name;
+                select.appendChild(opt);
+            });
+            if (defaultCountryId) {
+                select.value = defaultCountryId;
+            }
+        }
+
+        function handleCountryChange(isMy = false) {
+            const prefix = isMy ? 'my' : 'client';
+            const countryId = document.getElementById(prefix + 'Country').value;
+            const regionLabel = document.getElementById(prefix + 'RegionLabel');
+            const regionSelect = document.getElementById(prefix + 'Region');
+            const tzDisplay = document.getElementById(prefix + 'Timezone');
+            tzDisplay.textContent = '';
+            regionSelect.value = '';
+            if (!countryId) {
+                regionLabel.style.display = 'none';
+                return;
+            }
+            const tzs = countries[countryId].timezones;
+            const tzNames = tzs.map(tz => tz.name);
+            if (tzNames.length === 1) {
+                regionLabel.style.display = 'none';
+                tzDisplay.textContent = tzNames[0];
+            } else {
+                regionLabel.style.display = 'block';
+                regionSelect.innerHTML = '<option value="">Select Region</option>';
+                tzNames.forEach(tz => {
+                    const opt = document.createElement('option');
+                    opt.value = tz;
+                    opt.text = tz.split('/').pop().replace(/_/g, ' ');
+                    regionSelect.appendChild(opt);
+                });
+            }
+            updatePreview();
+        }
+
+        function handleRegionChange(isMy = false) {
+            const prefix = isMy ? 'my' : 'client';
+            const regionSelect = document.getElementById(prefix + 'Region');
+            const tzDisplay = document.getElementById(prefix + 'Timezone');
+            tzDisplay.textContent = regionSelect.value;
+            updatePreview();
+        }
+
+        function getTz(isMy = false) {
+            const prefix = isMy ? 'my' : 'client';
+            const regionLabel = document.getElementById(prefix + 'RegionLabel');
+            const tzDisplay = document.getElementById(prefix + 'Timezone');
+            if (regionLabel.style.display !== 'none') {
+                return document.getElementById(prefix + 'Region').value;
+            } else {
+                return tzDisplay.textContent;
+            }
+        }
+
+        function updatePreview() {
+            const previewError = document.getElementById('previewError');
+            previewError.textContent = '';
+            document.getElementById('clientPreview').textContent = '';
+            document.getElementById('myPreview').textContent = '';
+
+            const clientName = document.getElementById('clientName').value.trim();
+            const clientCountryId = document.getElementById('clientCountry').value;
+            if (!clientName || !clientCountryId) return;
+
+            const clientTz = getTz(false);
+            if (!clientTz) return;
+
+            const dateStr = document.getElementById('clientDate').value.trim();
+            const timeStr = document.getElementById('clientTime').value.trim();
+            if (!dateStr || !timeStr) return;
+
+            const datePattern = /^\d{1,2}[/.-]\d{1,2}[/.-]\d{4}$/;
+            if (!datePattern.test(dateStr)) {
+                previewError.textContent = 'Invalid date format. Use DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, MM/DD/YYYY, MM-DD-YYYY, or MM.DD.YYYY.';
+                return;
+            }
+
+            let normalizedTime = timeStr.trim().toUpperCase();
+            if (/^(1[0-2]|0?[1-9]) ?(AM|PM)$/.test(normalizedTime)) {
+                normalizedTime = normalizedTime.replace(/(\d+) ?(AM|PM)/, '$1:00 $2');
+            }
+
+            const timePattern = /^(1[0-2]|0?[1-9]):[0-5][0-9] (AM|PM)$/;
+            if (!timePattern.test(normalizedTime)) {
+                previewError.textContent = 'Invalid time format. Use h:mm AM/PM or h AM/PM.';
+                return;
+            }
+
+            const dateFormats = ['d/M/yyyy', 'd-M/yyyy', 'd.M.yyyy', 'M/d/yyyy', 'M-d/yyyy', 'M.d.yyyy'];
+            let dtClient = null;
+            for (const dateFmt of dateFormats) {
+                const fullFmt = `${dateFmt} h:mm a`;
+                const temp = DateTime.fromFormat(`${dateStr} ${normalizedTime}`, fullFmt, { zone: clientTz });
+                if (temp.isValid) {
+                    dtClient = temp;
+                    break;
+                }
+            }
+            if (!dtClient) {
+                previewError.textContent = 'Invalid date (e.g., February 30 or invalid day for month).';
+                return;
+            }
+
+            const clientCountry = countries[clientCountryId].name;
+            document.getElementById('clientPreview').textContent = `${clientName} — ${clientCountry} — ${dtClient.toFormat('h:mm a')} (on ${dtClient.toFormat('dd/MM/yyyy')})`;
+
+            const myTz = getTz(true);
+            if (!myTz) return;
+
+            const dtMy = dtClient.setZone(myTz);
+            const myTime = dtMy.toFormat('h:mm a');
+            const myDateStr = dtMy.toFormat('dd/MM/yyyy');
+
+            const clientDateIso = dtClient.toFormat('yyyy-MM-dd');
+            const myDateIso = dtMy.toFormat('yyyy-MM-dd');
+            let dayLabel = 'Same day';
+            if (myDateIso > clientDateIso) {
+                dayLabel = 'Next day';
+            } else if (myDateIso < clientDateIso) {
+                dayLabel = 'Previous day';
+            }
+            const daySuffix = dayLabel !== 'Same day' ? ` (${dayLabel})` : '';
+            document.getElementById('myPreview').textContent = `${myTime}${daySuffix} (on ${myDateStr})`;
+        }
+
+        function addToSchedule() {
+            const addError = document.getElementById('addError');
+            addError.textContent = '';
+
+            const clientName = document.getElementById('clientName').value.trim();
+            if (!clientName) {
+                addError.textContent = 'Client name is required.';
+                return;
+            }
+
+            const clientCountryId = document.getElementById('clientCountry').value;
+            if (!clientCountryId) {
+                addError.textContent = 'Client country is required.';
+                return;
+            }
+
+            const clientTz = getTz(false);
+            if (!clientTz) {
+                addError.textContent = 'Select region if the country has multiple timezones.';
+                return;
+            }
+
+            const dateStr = document.getElementById('clientDate').value.trim();
+            if (!dateStr) {
+                addError.textContent = 'Date is required.';
+                return;
+            }
+
+            const timeStr = document.getElementById('clientTime').value.trim();
+            if (!timeStr) {
+                addError.textContent = 'Time is required.';
+                return;
+            }
+
+            const datePattern = /^\d{1,2}[/.-]\d{1,2}[/.-]\d{4}$/;
+            if (!datePattern.test(dateStr)) {
+                addError.textContent = 'Invalid date format. Use DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, MM/DD/YYYY, MM-DD-YYYY, or MM.DD.YYYY.';
+                return;
+            }
+
+            let normalizedTime = timeStr.trim().toUpperCase();
+            if (/^(1[0-2]|0?[1-9]) ?(AM|PM)$/.test(normalizedTime)) {
+                normalizedTime = normalizedTime.replace(/(\d+) ?(AM|PM)/, '$1:00 $2');
+            }
+
+            const timePattern = /^(1[0-2]|0?[1-9]):[0-5][0-9] (AM|PM)$/;
+            if (!timePattern.test(normalizedTime)) {
+                addError.textContent = 'Invalid time format. Use h:mm AM/PM or h AM/PM.';
+                return;
+            }
+
+            const dateFormats = ['d/M/yyyy', 'd-M/yyyy', 'd.M.yyyy', 'M/d/yyyy', 'M-d/yyyy', 'M.d.yyyy'];
+            let dtClient = null;
+            for (const dateFmt of dateFormats) {
+                const fullFmt = `${dateFmt} h:mm a`;
+                const temp = DateTime.fromFormat(`${dateStr} ${normalizedTime}`, fullFmt, { zone: clientTz });
+                if (temp.isValid) {
+                    dtClient = temp;
+                    break;
+                }
+            }
+            if (!dtClient) {
+                addError.textContent = 'Invalid date (e.g., February 30 or invalid day for month).';
+                return;
+            }
+
+            const myTz = getTz(true);
+            if (!myTz) {
+                addError.textContent = 'Set your timezone.';
+                return;
+            }
+
+            const dtMy = dtClient.setZone(myTz);
+            const clientCountry = countries[clientCountryId].name;
+
+            const clientDateIso = dtClient.toFormat('yyyy-MM-dd');
+            const myDateIso = dtMy.toFormat('yyyy-MM-dd');
+            let dayShift = 'Same day';
+            if (myDateIso > clientDateIso) {
+                dayShift = 'Next day';
+            } else if (myDateIso < clientDateIso) {
+                dayShift = 'Previous day';
+            }
+
+            const clientShortFmt = dtClient.minute === 0 ? 'h a' : 'h:mm a';
+            const myShortFmt = dtMy.minute === 0 ? 'hh:mm a' : 'hh:mm a'; // Always show :mm for my time to match image
+
+            schedule.push({
+                clientName,
+                clientCountry,
+                clientTz,
+                clientDateTime: `${dtClient.toFormat('dd/MM/yyyy')} ${dtClient.toFormat('h:mm a')}`,
+                clientShortTime: dtClient.toFormat(clientShortFmt),
+                myTz,
+                myDateStr: dtMy.toFormat('dd/MM/yyyy'),
+                myTimeStr: dtMy.toFormat(myShortFmt),
+                myMillis: dtMy.toMillis(),
+                dayShift
+            });
+
+            renderSchedule();
+            document.getElementById('form').style.display = 'none';
+            document.getElementById('scheduleSection').style.display = 'block';
+
+            // Clear inputs except my location
+            document.getElementById('clientName').value = '';
+            document.getElementById('clientCountry').value = '';
+            document.getElementById('clientRegionLabel').style.display = 'none';
+            document.getElementById('clientTimezone').textContent = '';
+            document.getElementById('clientDate').value = '';
+            document.getElementById('clientTime').value = '';
+            updatePreview();
+        }
+
+        function renderSchedule() {
+            const list = document.getElementById('scheduleList');
+            list.innerHTML = '';
+            schedule.sort((a, b) => a.myMillis - b.myMillis);
+            schedule.forEach((item, index) => {
+                const dtMy = DateTime.fromFormat(`${item.myDateStr} ${item.myTimeStr}`, 'dd/MM/yyyy hh:mm a', { zone: item.myTz });
+                const dayAbbr = dtMy.toFormat('ccc');
+                const content = `${item.clientName} - ${dayAbbr} - ${item.myTimeStr} LT (${item.clientShortTime} ${item.clientCountry})`;
+                const div = document.createElement('div');
+                div.className = 'schedule-item';
+                div.innerHTML = `
+                    <span>${content}</span>
+                    <button onclick="deleteItem(${index})">Delete</button>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        window.deleteItem = function(index) {
+            schedule.splice(index, 1);
+            renderSchedule();
+        };
+
+        // Event listeners
+        document.getElementById('myCountry').addEventListener('change', () => handleCountryChange(true));
+        document.getElementById('myRegion').addEventListener('change', () => handleRegionChange(true));
+        document.getElementById('clientCountry').addEventListener('change', () => handleCountryChange(false));
+        document.getElementById('clientRegion').addEventListener('change', () => handleRegionChange(false));
+        document.getElementById('clientName').addEventListener('input', updatePreview);
+        document.getElementById('clientDate').addEventListener('input', updatePreview);
+        document.getElementById('clientTime').addEventListener('input', updatePreview);
+        document.getElementById('addButton').addEventListener('click', addToSchedule);
+        document.getElementById('cancelButton').addEventListener('click', () => {
+            document.getElementById('form').style.display = 'none';
+            document.getElementById('scheduleSection').style.display = 'block';
+        });
+        document.getElementById('addFormButton').addEventListener('click', () => {
+            document.getElementById('form').style.display = 'block';
+            document.getElementById('scheduleSection').style.display = 'none';
+        });
+    </script>
+</body>
+</html>
+```
