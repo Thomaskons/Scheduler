@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
 <head>
@@ -6,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Client Call Scheduler</title>
 
-  <!-- Default dark theme on load (prevents flash) -->
+  <!-- Default theme (dark) + persist theme -->
   <script>
     (() => {
       try {
-        const saved = localStorage.getItem('theme'); // 'dark' | 'light' | null
-        const useDark = saved ? saved === 'dark' : true; // default to dark
+        const saved = localStorage.getItem('theme');
+        const useDark = saved ? saved === 'dark' : true;
         document.documentElement.setAttribute('data-bs-theme', useDark ? 'dark' : 'light');
       } catch (e) {
         document.documentElement.setAttribute('data-bs-theme', 'dark');
@@ -23,35 +22,17 @@
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
 
   <style>
-    :root {
-      --wooden-brown: #8B4513;
-      --silver: #C0C0C0;
-    }
+    :root { --silver: #C0C0C0; }
     body {
       background-color: var(--bs-body-bg);
       color: var(--bs-body-color);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     }
-    .wooden-bg {
-      background: linear-gradient(135deg, #A0522D, #8B4513);
-      color: white;
-    }
+    .wooden-bg { background: linear-gradient(135deg, #A0522D, #8B4513); color: white; }
     .silver-text { color: var(--silver); }
-    .card {
-      border: 1px solid var(--bs-border-color);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    .schedule-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .theme-toggle {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1000;
-    }
+    .card { border: 1px solid var(--bs-border-color); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    .schedule-item { display: flex; justify-content: space-between; align-items: center; }
+    .theme-toggle { position: fixed; top: 20px; right: 20px; z-index: 1000; }
   </style>
 </head>
 
@@ -101,12 +82,11 @@
           <div class="mb-3">
             <label for="clientDate" class="form-label">Date (DD/MM/YYYY)</label>
             <input id="clientDate" type="text" class="form-control" placeholder="DD/MM/YYYY"
-                   pattern="(^\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}$)|^\\d{6}$|^\\d{8}$"
-                   title="Date in DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, MM/DD/YYYY, MM-DD-YYYY, MM.DD.YYYY, DDMMYYYY, or DDMMYY">
+                   pattern="(^\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}$)|^\\d{6}$|^\\d{8}$">
           </div>
 
           <div class="mb-3">
-            <label for="clientTime" class="form-label">Time (accepts 1400, 14:00, 2PM, 0200PM, etc.)</label>
+            <label for="clientTime" class="form-label">Time (1400, 14:00, 2PM, 0200PM...)</label>
             <input id="clientTime" type="text" class="form-control" placeholder="2:00 PM / 1400 / 14:00 / 2PM">
           </div>
         </section>
@@ -141,7 +121,9 @@
   <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
 
   <script>
-    // Theme
+    const { DateTime } = luxon;
+
+    // ---------- THEME ----------
     function syncThemeSwitch() {
       const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
       document.getElementById('themeSwitch').checked = isDark;
@@ -153,12 +135,27 @@
       html.setAttribute('data-bs-theme', newTheme);
       try { localStorage.setItem('theme', newTheme); } catch (e) {}
     }
-    window.addEventListener('DOMContentLoaded', syncThemeSwitch);
 
-    const { DateTime } = luxon;
+    // ---------- SCHEDULE PERSISTENCE ----------
+    const STORAGE_KEY = 'clientCallSchedule_v1';
+
+    let schedule = []; // loaded from storage
+    function saveSchedule() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(schedule)); } catch (e) {}
+    }
+    function loadSchedule() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        schedule = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(schedule)) schedule = [];
+      } catch (e) {
+        schedule = [];
+      }
+    }
+
+    // ---------- COUNTRIES ----------
     let countries = {};
     let countryList = [];
-    let schedule = [];
 
     fetch('https://raw.githubusercontent.com/osmanyz/country-timezone/main/data/country.json')
       .then(res => res.json())
@@ -168,6 +165,7 @@
         populateCountries('myCountry', 'AM');
         populateCountries('clientCountry');
         handleCountryChange(true);
+        renderSchedule(); // render once countries loaded (schedule already loaded on DOMContentLoaded)
       });
 
     function populateCountries(selectId, defaultCountryId = null) {
@@ -228,13 +226,11 @@
       const prefix = isMy ? 'my' : 'client';
       const regionLabel = document.getElementById(prefix + 'RegionLabel');
       const tzDisplay = document.getElementById(prefix + 'Timezone');
-      if (regionLabel.style.display !== 'none') {
-        return document.getElementById(prefix + 'Region').value;
-      } else {
-        return tzDisplay.textContent;
-      }
+      if (regionLabel.style.display !== 'none') return document.getElementById(prefix + 'Region').value;
+      return tzDisplay.textContent;
     }
 
+    // ---------- DATE/TIME HELPERS ----------
     function normalizeDate(dateStr) {
       if (/^\d{8}$/.test(dateStr)) {
         const dd = dateStr.slice(0, 2);
@@ -251,51 +247,41 @@
       return dateStr;
     }
 
-    /**
-     * Accepts:
-     *  - 2PM, 2 PM, 02PM, 10AM
-     *  - 2:00PM, 2:00 PM, 02:00PM
-     *  - 1400, 14:00, 14.00, 14-00
-     *  - 0200PM
-     * Returns: { ok: true, normalized: "h:mm AM/PM" } OR { ok:false, error:"..." }
-     */
+    function to12Hour(hh24, mm) {
+      const mer = hh24 >= 12 ? 'PM' : 'AM';
+      let h12 = hh24 % 12;
+      if (h12 === 0) h12 = 12;
+      const mmStr = String(mm).padStart(2, '0');
+      return `${h12}:${mmStr} ${mer}`;
+    }
+
+    // accepts: 0200PM, 2PM, 14:00, 1400, 14, 2:15pm, 7:5, etc.
     function normalizeTimeInput(raw) {
       if (!raw) return { ok: false, error: 'Time is required.' };
 
       let s = raw.trim().toUpperCase();
-      s = s.replace(/\s+/g, ''); // remove spaces: "2 PM" -> "2PM"
-
-      // unify separators to ':'
+      s = s.replace(/\s+/g, '');
       s = s.replace(/[.\-]/g, ':');
 
-      // detect AM/PM suffix
       const hasMeridiem = /(AM|PM)$/.test(s);
 
-      // Case A: AM/PM format
       if (hasMeridiem) {
         const mer = s.endsWith('AM') ? 'AM' : 'PM';
-        let t = s.slice(0, -2); // remove AM/PM
+        let t = s.slice(0, -2);
 
-        // 0200 -> 02:00
         if (/^\d{3,4}$/.test(t)) {
-          // allow 200 or 0200
           if (t.length === 3) t = '0' + t;
           const hh = t.slice(0, 2);
           const mm = t.slice(2, 4);
           t = `${parseInt(hh, 10)}:${mm}`;
         }
 
-        // 2 -> 2:00
-        if (/^\d{1,2}$/.test(t)) {
-          t = `${parseInt(t, 10)}:00`;
-        }
+        if (/^\d{1,2}$/.test(t)) t = `${parseInt(t, 10)}:00`;
 
-        // 2:0 -> 2:00, 2:5 -> 2:05
         if (/^\d{1,2}:\d{1,2}$/.test(t)) {
           const [hStr, mStr] = t.split(':');
           const h = parseInt(hStr, 10);
           const m = parseInt(mStr, 10);
-          if (!Number.isFinite(h) || !Number.isFinite(m)) return { ok: false, error: 'Invalid time.' };
           if (h < 1 || h > 12) return { ok: false, error: 'Hour must be 1-12 for AM/PM time.' };
           if (m < 0 || m > 59) return { ok: false, error: 'Minutes must be 00-59.' };
           const mm = String(m).padStart(2, '0');
@@ -305,10 +291,8 @@
         return { ok: false, error: 'Invalid time. Examples: 2PM, 02:00PM, 0200PM.' };
       }
 
-      // Case B: 24-hour format (no AM/PM)
-      // Accept: 1400, 14:00, 0:30, 0730, 7:30
+      // 24h: 1400 / 0730
       if (/^\d{3,4}$/.test(s)) {
-        // 730 => 07:30
         if (s.length === 3) s = '0' + s;
         const hh = parseInt(s.slice(0, 2), 10);
         const mm = parseInt(s.slice(2, 4), 10);
@@ -317,6 +301,7 @@
         return { ok: true, normalized: to12Hour(hh, mm) };
       }
 
+      // 24h: 14:00 / 7:5
       if (/^\d{1,2}:\d{1,2}$/.test(s)) {
         const [hStr, mStr] = s.split(':');
         const hh = parseInt(hStr, 10);
@@ -326,7 +311,7 @@
         return { ok: true, normalized: to12Hour(hh, mm) };
       }
 
-      // If user typed just "14" treat as 14:00 (24h)
+      // 24h: "14" => 14:00
       if (/^\d{1,2}$/.test(s)) {
         const hh = parseInt(s, 10);
         if (hh < 0 || hh > 23) return { ok: false, error: 'Hour must be 00-23.' };
@@ -334,14 +319,6 @@
       }
 
       return { ok: false, error: 'Invalid time. Examples: 2PM, 0200PM, 14:00, 1400.' };
-    }
-
-    function to12Hour(hh24, mm) {
-      const mer = hh24 >= 12 ? 'PM' : 'AM';
-      let h12 = hh24 % 12;
-      if (h12 === 0) h12 = 12;
-      const mmStr = String(mm).padStart(2, '0');
-      return `${h12}:${mmStr} ${mer}`;
     }
 
     function parseClientDateTime(clientTz) {
@@ -360,26 +337,20 @@
 
       dateStr = normalizeDate(dateStr);
 
-      // Date formats allowed
       const dateFormats = ['d/M/yyyy', 'd-M/yyyy', 'd.M.yyyy', 'M/d/yyyy', 'M-d/yyyy', 'M.d.yyyy'];
-
       let dtClient = null;
+
       for (const dateFmt of dateFormats) {
-        const fullFmt = `${dateFmt} h:mm a`; // because t.normalized is always "h:mm AM/PM"
+        const fullFmt = `${dateFmt} h:mm a`;
         const temp = DateTime.fromFormat(`${dateStr} ${t.normalized}`, fullFmt, { zone: clientTz });
-        if (temp.isValid) {
-          dtClient = temp;
-          break;
-        }
+        if (temp.isValid) { dtClient = temp; break; }
       }
 
-      if (!dtClient) {
-        return { ok: false, error: 'Invalid date/time (e.g., February 30 or invalid day for month).' };
-      }
-
-      return { ok: true, dtClient, normalizedTime: t.normalized };
+      if (!dtClient) return { ok: false, error: 'Invalid date/time.' };
+      return { ok: true, dtClient };
     }
 
+    // ---------- UI LOGIC ----------
     function updatePreview() {
       const previewError = document.getElementById('previewError');
       previewError.textContent = '';
@@ -395,7 +366,6 @@
 
       const parsed = parseClientDateTime(clientTz);
       if (!parsed.ok) {
-        // only show error if user has started typing time/date
         const dateHas = document.getElementById('clientDate').value.trim().length > 0;
         const timeHas = document.getElementById('clientTime').value.trim().length > 0;
         if (dateHas || timeHas) previewError.textContent = parsed.error;
@@ -403,7 +373,7 @@
       }
 
       const dtClient = parsed.dtClient;
-      const clientCountry = countries[clientCountryId].name;
+      const clientCountry = countries[clientCountryId]?.name || '';
       document.getElementById('clientPreview').textContent =
         `${clientName} — ${clientCountry} — ${dtClient.toFormat('h:mm a')} (on ${dtClient.toFormat('dd/MM/yyyy')})`;
 
@@ -440,15 +410,13 @@
       const parsed = parseClientDateTime(clientTz);
       if (!parsed.ok) { addError.textContent = parsed.error; return; }
 
-      const dtClient = parsed.dtClient;
-
       const myTz = getTz(true);
       if (!myTz) { addError.textContent = 'Set your timezone.'; return; }
 
+      const dtClient = parsed.dtClient;
       const dtMy = dtClient.setZone(myTz);
-      const clientCountry = countries[clientCountryId].name;
 
-      // Show client time nicely in schedule
+      const clientCountry = countries[clientCountryId].name;
       const clientShortTime = dtClient.minute === 0 ? dtClient.toFormat('h a') : dtClient.toFormat('h:mm a');
 
       schedule.push({
@@ -460,11 +428,12 @@
         myMillis: dtMy.toMillis()
       });
 
+      saveSchedule();     // ✅ persist
       renderSchedule();
+
       document.getElementById('form').style.display = 'none';
       document.getElementById('scheduleSection').style.display = 'block';
 
-      // Clear inputs except my location
       document.getElementById('clientName').value = '';
       document.getElementById('clientCountry').value = '';
       document.getElementById('clientRegionLabel').style.display = 'none';
@@ -501,10 +470,18 @@
 
     window.deleteItem = function(index) {
       schedule.splice(index, 1);
+      saveSchedule();     // ✅ persist
       renderSchedule();
     };
 
-    // Event listeners
+    // ---------- STARTUP ----------
+    window.addEventListener('DOMContentLoaded', () => {
+      syncThemeSwitch();
+      loadSchedule();   // ✅ load saved schedule
+      renderSchedule(); // will render even before country list finishes (safe)
+    });
+
+    // ---------- EVENT LISTENERS ----------
     document.getElementById('myCountry').addEventListener('change', () => handleCountryChange(true));
     document.getElementById('myRegion').addEventListener('change', () => handleRegionChange(true));
     document.getElementById('clientCountry').addEventListener('change', () => handleCountryChange(false));
@@ -524,4 +501,3 @@
   </script>
 </body>
 </html>
-
