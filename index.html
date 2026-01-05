@@ -1,10 +1,24 @@
-
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="light">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Client Call Scheduler</title>
+
+    <!-- Make dark mode default at load (prevents flash) -->
+    <script>
+        (() => {
+            try {
+                const saved = localStorage.getItem('theme'); // 'dark' | 'light' | null
+                const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const useDark = saved ? saved === 'dark' : true; // default to dark
+                document.documentElement.setAttribute('data-bs-theme', useDark ? 'dark' : 'light');
+            } catch (e) {
+                document.documentElement.setAttribute('data-bs-theme', 'dark');
+            }
+        })();
+    </script>
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <style>
         :root {
@@ -121,6 +135,22 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
     <script>
+        // Sync the switch with the current theme on load
+        function syncThemeSwitch() {
+            const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+            document.getElementById('themeSwitch').checked = isDark;
+        }
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const switchInput = document.getElementById('themeSwitch');
+            const newTheme = switchInput.checked ? 'dark' : 'light';
+            html.setAttribute('data-bs-theme', newTheme);
+            try { localStorage.setItem('theme', newTheme); } catch (e) {}
+        }
+
+        window.addEventListener('DOMContentLoaded', syncThemeSwitch);
+
         const { DateTime } = luxon;
         let countries = {};
         let countryList = [];
@@ -366,36 +396,21 @@
             const dtMy = dtClient.setZone(myTz);
             const clientCountry = countries[clientCountryId].name;
 
-            const clientDateIso = dtClient.toFormat('yyyy-MM-dd');
-            const myDateIso = dtMy.toFormat('yyyy-MM-dd');
-            let dayShift = 'Same day';
-            if (myDateIso > clientDateIso) {
-                dayShift = 'Next day';
-            } else if (myDateIso < clientDateIso) {
-                dayShift = 'Previous day';
-            }
-
             const clientShortFmt = dtClient.minute === 0 ? 'h a' : 'h:mm a';
-            const myShortFmt = dtMy.minute === 0 ? 'h a' : 'hh:mm a';
 
             schedule.push({
                 clientName,
                 clientCountry,
                 clientTz,
-                clientDateTime: `${dtClient.toFormat('dd/MM/yyyy')} ${dtClient.toFormat('h:mm a')}`,
                 clientShortTime: dtClient.toFormat(clientShortFmt),
                 myTz,
-                myDateStr: dtMy.toFormat('dd/MM/yyyy'),
-                myTimeStr: dtMy.toFormat(myShortFmt),
-                myMillis: dtMy.toMillis(),
-                dayShift
+                myMillis: dtMy.toMillis()
             });
 
             renderSchedule();
             document.getElementById('form').style.display = 'none';
             document.getElementById('scheduleSection').style.display = 'block';
 
-            // Clear inputs except my location
             document.getElementById('clientName').value = '';
             document.getElementById('clientCountry').value = '';
             document.getElementById('clientRegionLabel').style.display = 'none';
@@ -405,7 +420,6 @@
             updatePreview();
         }
 
-        // ✅ FIXED: no parsing strings, always use millis + show date
         function renderSchedule() {
             const list = document.getElementById('scheduleList');
             list.innerHTML = '';
@@ -415,9 +429,9 @@
             schedule.forEach((item, index) => {
                 const dtMy = DateTime.fromMillis(item.myMillis, { zone: item.myTz });
 
-                const dayAbbr = dtMy.toFormat('ccc');         // Mon, Tue...
-                const dateStr = dtMy.toFormat('dd/MM/yyyy');  // show date
-                const myTime = dtMy.toFormat('h:mm a');       // consistent time
+                const dayAbbr = dtMy.toFormat('ccc');
+                const dateStr = dtMy.toFormat('dd/MM/yyyy');
+                const myTime = dtMy.toFormat('h:mm a');
 
                 const content =
                     `${item.clientName} - ${dayAbbr} ${dateStr} - ${myTime} LT ` +
@@ -437,16 +451,6 @@
             schedule.splice(index, 1);
             renderSchedule();
         };
-
-        function toggleTheme() {
-            const html = document.documentElement;
-            const switchInput = document.getElementById('themeSwitch');
-            if (switchInput.checked) {
-                html.setAttribute('data-bs-theme', 'dark');
-            } else {
-                html.setAttribute('data-bs-theme', 'light');
-            }
-        }
 
         // Event listeners
         document.getElementById('myCountry').addEventListener('change', () => handleCountryChange(true));
@@ -468,4 +472,3 @@
     </script>
 </body>
 </html>
-
